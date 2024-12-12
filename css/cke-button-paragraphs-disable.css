@@ -1,0 +1,4 @@
+ button[data-cke-tooltip-text="Paragraphs"],
+ a.cke_button__paragraphs_inline_entity_form {
+   display: none !important;
+ }

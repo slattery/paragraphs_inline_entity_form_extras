@@ -1,0 +1,9 @@
+langcode: en
+status: true
+dependencies: {  }
+id: paragraphs_ief_carrier
+label: 'Embedded Carrier Paragraph'
+icon_uuid: null
+icon_default: null
+description: 'Carrier paragraph that stores the content paragraph in a paragraph field, to facilitate paragraph behaviors for the content paragraph.'
+behavior_plugins: {  }

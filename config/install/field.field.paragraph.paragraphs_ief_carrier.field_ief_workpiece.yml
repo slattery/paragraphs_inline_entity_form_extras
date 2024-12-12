@@ -1,0 +1,25 @@
+langcode: en
+status: true
+dependencies:
+  config:
+    - field.storage.paragraph.field_ief_workpiece
+    - paragraphs.paragraphs_type.paragraphs_ief_carrier
+  module:
+    - entity_reference_revisions
+id: paragraph.paragraphs_ief_carrier.field_ief_workpiece
+field_name: field_ief_workpiece
+entity_type: paragraph
+bundle: paragraphs_ief_carrier
+label: 'Embedded Content Paragraph'
+description: 'Paragraph intended to be emebedded in a WYSIWYG editor.'
+required: false
+translatable: false
+default_value: {  }
+default_value_callback: ''
+settings:
+  handler: 'default:paragraph'
+  handler_settings:
+    target_bundles: null
+    negate: 0
+    target_bundles_drag_drop: { }
+field_type: entity_reference_revisions

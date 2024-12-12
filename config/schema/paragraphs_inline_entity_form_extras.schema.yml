@@ -1,0 +1,8 @@
+paragraphs_inline_entity_form_extras.node_type.*.third_party.paragraphs_inline_entity_form_extras:
+  type: mapping
+  label: 'Promoter per-node type third party settings'
+  mapping:
+    adopt_embedded_paragraphs:
+      type: boolean
+      label: 'Adopt embedded paragraphs from WYSIWYG fields on the node'
+

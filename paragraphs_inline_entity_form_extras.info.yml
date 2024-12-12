@@ -1,0 +1,10 @@
+---
+core_version_requirement: '^9 || ^10'
+description: 'UI helpers for paragraph behaviors on embedded paragraphs, finds embedded paragraphs on a node and populates parent information.'
+name: 'Paragraphs Inline Entity Form Extras'
+package: 'YSE Web Operations'
+type: module
+version: 1.1.0
+dependencies:
+  - paragraphs_inline_entity_form:paragraphs_inline_entity_form
+  - entity_embed:entity_embed

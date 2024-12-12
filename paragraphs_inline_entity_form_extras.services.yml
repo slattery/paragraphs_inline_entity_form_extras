@@ -1,0 +1,8 @@
+services:
+  paragraphs_inline_entity_form_extras.collector:
+    class: Drupal\paragraphs_inline_entity_form_extras\Service\Collector
+    arguments:
+      - '@entity_field.manager'
+      - '@entity_type.manager'
+      - '@plugin.manager.filter'
+      - '@module_handler'

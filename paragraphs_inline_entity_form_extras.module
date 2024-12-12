@@ -1,0 +1,482 @@
+<?php
+
+use Drupal\Core\Config\StorageException;
+use Drupal\Core\Entity\Entity\EntityFormDisplay;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Url;
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\node\Entity\NodeType;
+use Drupal\node\NodeTypeInterface;
+use Drupal\paragraphs\Entity\Paragraph;
+
+
+
+/**
+ * Implements hook_help().
+ */
+function paragraphs_inline_entity_form_extras_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the paragraphs module.
+    case 'help.page.paragraphs_inline_entity_form_extras':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('This module works on top of <a href=":pief">Paragraphs Inline Entity Form</a> to prevent embedded paragraphs from being orphaned when they are embedded in a WYSYWYG field, and helps the UI give access to paragraph behaviors.', [':pief' => 'https://www.drupal.org/project/paragraphs_inline_entity_form']) . '</p>';
+      $output .= '<h3>' . t('Uses') . '</h3>';
+      $output .= '<dt>' . t('Adopting Embedded Paragraphs') . '</dt>';
+      $output .= '<dd>' . t('Embedded paragraphs by default are saved without populating the parent metadata, and as such they are considered "orphaned." This module adds a configurable field to the nodes that use embeds, and the paragraph parent metadata is populated during the node save process to associate them with the node field.') . '</dd>';
+      $output .= '<dt>' . t('Accessing Paragraph Behaviors') . '</dt>';
+      $output .= '<dd>' . t('The forms that handle adding and editing embedded paragraphs get altered by this module to accommodate the Paragraphs field behavior UI.') . '</dd>';
+      $output .= '<p>' . t('For more information please refer to the README file.');
+      return $output;
+      break;
+  }
+}
+
+/**
+ * Calls service that sweeps wysiwyg content for embedded paragraph uuids
+ * Each one is checked for empty parent fields, and populated with node info.
+ *
+ * @param $node
+ *  The node that holds the wysiwyg fields.
+ *
+ * @return array
+ *  Array of uuids affected. Will return an empty array if orphan count is 0.
+ */
+function paragraphs_inline_entity_form_extras_node_presave(EntityInterface $node) {
+  \Drupal::service('paragraphs_inline_entity_form_extras.collector')->adopt_paragraphs_from_node($node);
+}
+
+
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter().
+ *
+ * Add third party opt-in setting to node type form.  If there are node types
+ * that will not use the paragraphs_inline_entity_form button we can avoid the
+ * processing of the wysiwyg fields.
+ */
+function paragraphs_inline_entity_form_extras_form_node_type_form_alter(&$form, FormStateInterface $form_state): void {
+  /** @var Drupal\node\NodeTypeInterface $node_type */
+  $node_type = $form_state->getFormObject()->getEntity();
+  $form['adopt'] = [
+    '#type' => 'details',
+    '#title' => t('Embedded Paragraphs'),
+    '#group' => 'additional_settings',
+  ];
+  $form['adopt']['adopt_embedded_paragraphs'] = [
+    '#type' => 'checkbox',
+    '#title' => t('Adopt Embedded Parapraphs from WYSIWYG'),
+    '#default_value' => $node_type->getThirdPartySetting('paragraphs_inline_entity_form_extras', 'adopt_embedded_paragraphs', FALSE),
+    '#description' => t('Embedded paragraphs are collected on presave and stored in a hidden field.'),
+  ];
+  $form['#entity_builders'][] = 'paragraphs_inline_entity_form_extras_form_node_type_form_builder';
+}
+
+/**
+ * Entity builder for the node type form with third party options.
+ *
+ * @see paragraphs_inline_entity_form_extras_form_node_type_form_alter()
+ */
+function paragraphs_inline_entity_form_extras_form_node_type_form_builder($entity_type, NodeTypeInterface $type, &$form, FormStateInterface $form_state) {
+  if ($form_state->isValueEmpty('adopt_embedded_paragraphs')) {
+    $type->unsetThirdPartySetting('paragraphs_inline_entity_form_extras', 'adopt_embedded_paragraphs');
+  }
+  else {
+    $type->setThirdPartySetting('paragraphs_inline_entity_form_extras', 'adopt_embedded_paragraphs', $form_state->getValue('adopt_embedded_paragraphs'));
+  }
+}
+
+/**
+ * Adds a paragraphs field to the node type if the node type has opted in.
+ *
+ * Implements hook_ENTITY_TYPE_presave().
+ *
+ * @see field.storage.node.field_embedded_paragraphs
+ */
+function paragraphs_inline_entity_form_extras_node_type_presave(NodeTypeInterface $node_type) {
+
+  /**
+   * if this node type has not opted-in, we can not proceed.*/
+  if (!array_key_exists('adopt_embedded_paragraphs', $node_type->getThirdPartySettings('paragraphs_inline_entity_form_extras'))) {
+    return;
+  }
+
+  /**
+   * if we do not have storage for the field, we can not proceed.
+   *
+   * @throws StorageException is field storage is not there because we tested
+   *  for the opt-in above, and we need this to add the field config to the type.
+   */
+
+  /** @var Drupal\field\Entity\FieldStorageConfig $field_storage */
+  if (!$field_storage = FieldStorageConfig::loadByName('node', 'field_embedded_paragraphs')) {
+    throw new StorageException("field_embedded_paragraphs was not found.");
+  }
+
+  /**
+   * if the field_embedded_paragraphs field exists for this bundle, no
+   * action is needed.  If not, attempt to add the field to the type.
+   */
+
+  /** @var Drupal\field\Entity\FieldConfig $field */
+  if ($field = FieldConfig::loadByName('node', $node_type->id(), 'field_embedded_paragraphs')) {
+    return;
+  }
+
+  //create the field from field storage and save it.
+  $field = FieldConfig::create([
+    'field_name' => 'field_embedded_paragraphs',
+    'entity_type' => 'node',
+    'field_storage' => $field_storage,
+    'bundle' => $node_type->id(),
+    'label' => 'Embedded Paragraphs',
+    'description' => 'Paragraphs found here were created within WYSIWYG fields on the node or nested in paragraphs!   You should not remove them from here, delete them from the WYSIWYG that houses them.   You may edit them but be careful, layout may be impacted as a side-effect.',
+    'settings' => [
+      'handler' => 'default:paragraph',
+      'handler_settings' => ['target_bundles' => NULL],
+    ],
+  ]);
+  $field->save();
+
+  /**
+   * NOTE: when this field is added, the view display defaults to hidden
+   * which is good, so no editing is done on EntityViewDisplay
+   *
+   * Prepare to edit the form display
+   * TODO: find out if this exists when isNew prior to presave.
+   */
+
+  /** @var Drupal\Core\Entity\Entity\EntityFormDisplay $formview */
+  $formview = EntityFormDisplay::load('node' . '.' . $node_type->id() . '.' . 'default');
+  if ($formview) {
+    $component = $formview->getComponent('field_embedded_paragraphs');
+    if (!$component) {
+      $formview->setComponent('field_embedded_paragraphs', [
+        'type' => 'paragraphs',
+        'weight' => '100',
+        'region' => 'content',
+        'settings' => [
+          'display_label' => TRUE,
+          'title' => 'Embedded Paragraph',
+          'title_plural' => 'Embedded Paragraphs',
+          'edit_mode' => 'closed',
+          'closed_mode' => 'summary',
+          'autocollapse' => 'none',
+          'closed_mode_threshold' => '0',
+          'add_mode' => 'dropdown',
+          'form_display_mode' => 'default',
+          'default_paragraph_type' => '',
+          'target_bundles' => [],
+          'features' => [
+            'add_above' => '0',
+            'collapse_edit_all' => 'collapse_edit_all',
+            'convert' => '0',
+            'duplicate' => '0',
+          ],
+        ]
+      ]);
+      $formview->save();
+    }
+  }
+}
+
+
+/**
+ * Implements hook_entity_extra_field_info().
+ *
+ * Holds a list of embedded paragraphs on the node edit page. Updates made
+ * to the WYSIWYG fields save changes to the paragraphs independently by
+ * design.  We hide the field_embedded_paragraphs field to avoid conflicts
+ * when saving the node.  If we do not update that field via AjaxCommands
+ * upon every embed edit, the node will save the version of the paragraphs
+ * it finds when the form is loaded.
+ *
+ * @see paragraphs_inline_entity_form_extras_form_node_form_alter()
+ */
+function paragraphs_inline_entity_form_extras_entity_extra_field_info() {
+  $extra = [];
+  foreach (NodeType::loadMultiple() as $node_type) {
+    if (array_key_exists('adopt_embedded_paragraphs', $node_type->getThirdPartySettings('paragraphs_inline_entity_form_extras'))) {
+      $extra['node'][$node_type->id()]['form']['adopted_paragraphs_for_node'] = [
+        'label' => t('Adopted Paragraphs List'),
+        'description' => t('Lists paragraphs embedded in WYSIWYGS.'),
+        'visible' => FALSE,
+      ];
+    }
+  }
+  return $extra;
+}
+
+/**
+ * Implements Implements hook_form_node_form_alter()
+ *
+ * Puts the list of adopted paragraphs on the edit form
+ *
+ * @see paragraphs_inline_entity_form_extras_entity_extra_field_info()
+ */
+
+function paragraphs_inline_entity_form_extras_form_node_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+
+  /** @var \Drupal\node\NodeForm $form_object */
+  $form_object = $form_state->getFormObject();
+  if ($form_object->getOperation() != 'edit') {
+    // New entities won't have saved adoptions.
+    return;
+  }
+
+  /** @var \Drupal\node\Node $node */
+  $node = $form_state->getFormObject()->getEntity();
+  /** @var \Drupal\node\NodeType $type */
+  $type = $node->type->entity;
+
+  if (!$node->hasField('field_embedded_paragraphs')) {
+    $form['#attached']['library'][] = 'paragraphs_inline_entity_form_extras/button-bgone';
+    return;
+  }
+
+  if (!array_key_exists('adopt_embedded_paragraphs', $type->getThirdPartySettings('paragraphs_inline_entity_form_extras'))) {
+    $form['#attached']['library'][] = 'paragraphs_inline_entity_form_extras/button-bgone';
+    return;
+  }
+
+  $adopted_paragraph_rows = [];
+
+  /** @var \Drupal\entity_reference_revisions\EntityReferenceRevisionsFieldItemList $votes */
+  $refs = $node->get('field_embedded_paragraphs');
+  /** @var \Drupal\paragraphs\Entity\Paragraph $adopted */
+  foreach ($refs->referencedEntities() as $adopted) {
+    if ($adopted->hasField('field_ief_workpiece')) {
+      $workpiecerefs = $adopted->get('field_ief_workpiece');
+      //There should only be one ref in here!
+      if (!empty($workpiecerefs->referencedEntities())) {
+        /** @var \Drupal\paragraphs\Entity\Paragraph $adopted */
+        $workpiece = $workpiecerefs->referencedEntities()[0];
+        $adopted_paragraph_rows[] = ['type' => $workpiece->getType(), 'summary' => $workpiece->getSummary()];
+      }
+    }
+    else {
+      $adopted_paragraph_rows[] = ['type' => $adopted->getType(), 'summary' => $adopted->getSummary()];
+    }
+  }
+
+
+  $form['adopted_paragraphs_for_node'] = [
+    '#type' => 'details',
+    '#title' => \Drupal::translation()->formatPlural(
+      count($adopted_paragraph_rows),
+      'Adopted Paragraph',
+      'Adopted Paragraphs'
+    ),
+    '#open' => FALSE,
+    '#access' => \Drupal::currentUser()->hasPermission('administer nodes'),
+  ];
+
+  //Not putting parent_field in here until it matters.
+
+  $form['adopted_paragraphs_for_node']['table'] = [
+    '#type' => 'table',
+    '#header' => [
+      t('Type'),
+      t('Summary'),
+    ],
+    '#empty' => t('- None -'),
+  ];
+
+  foreach ($adopted_paragraph_rows as $row) {
+    $assoc = [
+      'type' => [
+        '#markup' => $row['type'],
+      ],
+      'summary' => [
+        '#markup' => $row['summary'],
+      ],
+    ];
+
+    $form['adopted_paragraphs_for_node']['table'][] = $assoc;
+  }
+}
+
+/**
+ * Implements hook_theme_suggestions_HOOK_alter()
+ *
+ * Affects the paragraphs field widget
+ *
+ * We no not want paragraphs to be added via the field, so we attempt
+ * a low-impact solution by offering an alternate twig template for the
+ * multiple value form widget that does not render the add button.
+ * The template is found in a templates directory for this module.
+ *
+ *
+ * @see paragraphs_inline_entity_form_extras_theme()
+ * @see field-multiple-value-form--field-embedded-paragraphs.html.twig
+ *
+ *
+ */
+
+function paragraphs_inline_entity_form_extras_theme_suggestions_field_multiple_value_form_alter(&$suggestions, array $variables) {
+  if (isset($variables['element']['#attributes']['data-drupal-selector'])) {
+    if ($variables['element']['#attributes']['data-drupal-selector'] == 'edit-field-embedded-paragraphs') {
+      $suggestions[] = 'field_multiple_value_form__field_embedded_paragraphs';
+    }
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function paragraphs_inline_entity_form_extras_theme() {
+  return [
+    'field_multiple_value_form__field_embedded_paragraphs' => [
+      'template' => 'field-multiple-value-form--field-embedded-paragraphs',
+      'base hook' => 'field_multiple_value_form',
+    ],
+    'paragraphs_summary__workpiece' => [
+      'template' => 'paragraphs-summary--workpiece',
+      'base hook' => 'paragraphs_summary',
+    ],
+    'html__paragraphs_inline_entity_form_extras__paragraph' => [
+      'template' => 'html--paragraphs-inline-entity-form-extras--paragraph',
+      'base hook' => 'html',
+    ],
+    'page__paragraphs_inline_entity_form_extras__paragraph' => [
+      'template' => 'page--paragraphs-inline-entity-form-extras--paragraph',
+      'base hook' => 'page',
+    ],
+    'container__paragraph_paragraphs_ief_carrier_form__field_ief_workpiece_wrapper' => [
+      'template' => 'container--paragraph-paragraphs-ief-carrier-form--field-ief-workpiece-wrapper',
+      'base hook' => 'container',
+    ],
+    'container__paragraph_paragraphs_ief_carrier_edit_form__field_ief_workpiece_wrapper' => [
+      'template' => 'container--paragraph-paragraphs-ief-carrier-edit-form--field-ief-workpiece-wrapper',
+      'base hook' => 'container',
+    ],
+    'container__entity_browser_paragraph_items_form__inline_entity_form' => [
+      'template' => 'container--entity-browser-paragraph-items-form',
+      'base hook' => 'container',
+    ],
+    'paragraph__paragraphs_ief_carrier' => [
+      'template' => 'paragraph--paragraphs-ief-carrier',
+      'base hook' => 'paragraph',
+    ]
+  ];
+}
+
+
+/**
+ * Implements hook_entity_form_mode_alter().
+ */
+function paragraphs_inline_entity_form_extras_node_form_mode_alter(&$form_mode, \Drupal\Core\Entity\EntityInterface $entity) {
+  if ($entity->bundle() == 'yse_reusable_item' && $entity->label() == 'Embedded Paragraph') {
+    $form_mode = 'embedded_paragraphs';
+  }
+}
+
+/**
+ * Implements hook_form_entity_browser_ENTITY_BROWSER_ID_form_alter
+ *
+ * We need to pass two bundles to the entity inline form in order to build the
+ * carrier-workpiece paragraph pair.  This function keeps the selected_bundle
+ * value in the form state to pass to the inline entity form as the workpiece
+ * paragraph, and swaps the '#bundle' value to allow the inline entity form to
+ * load carrier paragraph which will hold the workpiece paragraph of the
+ * selected type.
+ *
+ * @see paragraphs_inline_entity_form_extras_inline_entity_form_entity_form_alter()
+ */
+
+function paragraphs_inline_entity_form_extras_form_entity_browser_paragraph_items_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state) {
+  if (isset($form_state->getUserInput()['selected_bundle']) && !empty($form_state->getUserInput()['selected_bundle'])) {
+    if (isset($form['widget']) && isset($form['widget']['inline_entity_form'])) {
+      $form['widget']['inline_entity_form']['#bundle'] = 'paragraphs_ief_carrier';
+    }
+  }
+}
+
+
+
+/**
+ * Implements hook_inline_entity_form_entity_form_alter()
+ *
+ * Performs a pre-render paragraph swap. A new paragraph of the selected_bundle
+ * is placed in the workpiece field of a carrier paragraph, in order to allow
+ * paragraph behaviors to be accessed in the edit ui.  The carrier/workpiece
+ * pair is stored and the carrier is not rendered in view.
+ *
+ * @see paragraphs_inline_entity_form_extras_theme()
+ * @see paragraph--paragraphs-ief-carrier.html.twig
+ */
+function paragraphs_inline_entity_form_extras_inline_entity_form_entity_form_alter(array &$entity_form, \Drupal\Core\Form\FormStateInterface &$form_state) {
+  //belt and suspenders intake
+  if (
+    isset($entity_form['#entity']) && $entity_form['#entity']->getEntityTypeId() == 'paragraph' &&
+    isset($form_state->getUserInput()['form_id']) && $form_state->getUserInput()['form_id'] == 'entity_browser_paragraph_items_form' &&
+    isset($form_state->getUserInput()['selected_bundle']) && !empty($form_state->getUserInput()['selected_bundle'])
+  ) {
+
+    $selected_bundle = $form_state->getUserInput()['selected_bundle'];
+    $targ = 'paragraph.' . $selected_bundle . '.default';
+    $workpiece = Paragraph::create(['type' => $selected_bundle]);
+    $entity_form_display = \Drupal::service('entity_type.manager')->getStorage('entity_form_display')->load('paragraph.paragraphs_ief_carrier.default');
+    $selected_bundle_form_display = \Drupal::service('entity_type.manager')->getStorage('entity_form_display')->load($targ);
+
+    $top_widget = $entity_form_display->getRenderer('field_ief_workpiece');
+    $top_widget->setSetting('default_paragraph_type', $selected_bundle);
+    $top_widget_state = $top_widget->getWidgetState($entity_form['#parents'], 'field_ief_workpiece', $form_state);
+    $top_widget_state['paragraphs'][0] = ['entity' => $workpiece, 'display' => $selected_bundle_form_display, 'mode' => 'edit', "original_delta" => 1];
+    $top_widget->setWidgetState($entity_form['#parents'], 'field_ief_workpiece', $form_state, $top_widget_state);
+
+    $paras = $entity_form['#entity']->get('field_ief_workpiece');
+    $paras->setValue([]);
+    $entity_form['field_ief_workpiece'] = $top_widget->form($paras, $entity_form, $form_state);
+
+  }
+}
+
+/**
+ * Implements hook_theme_suggestions_HOOK_alter()
+ *
+ * @see paragraphs_inline_entity_form_extras_theme()
+ * @see paragraphs-summary--workpiece.html.twig
+ */
+function paragraphs_inline_entity_form_extras_theme_suggestions_paragraphs_summary_alter(&$suggestions, array $variables) {
+  if (isset($variables['element']['#array_parents']) and is_array($variables['element']['#array_parents'])) {
+    $parafield = reset($variables['element']['#array_parents']);
+    if ($parafield == 'field_embedded_paragraphs') {
+      $suggestions[] = 'paragraphs_summary__workpiece';
+    }
+  }
+}
+
+/**
+ * Implements Implements hook_preprocess_HOOK().
+ */
+function paragraphs_inline_entity_form_extras_preprocess_paragraphs_summary(&$variables) {
+  //when https://www.drupal.org/project/paragraphs/issues/3157819 is committed we can do this.
+}
+
+/**
+ * Checks that the browser type is a paragraph_item.
+ * Copied from paragraphs_inline_entity_form module
+ *
+ * @param $form
+ *  The form.
+ *
+ * @return boolean
+ *  True if it is a paragraph_item entity browser.
+ */
+function _paragraphs_inline_entity_form_entity_browser_is_paragraph_item($form) {
+  if (isset($form['entity_browser']['#entity_browser'])
+    && $form['entity_browser']['#entity_browser'] == 'paragraph_items') {
+    return TRUE;
+  }
+  if (isset($form['attributes']['data-embed-button'])
+    && $form['attributes']['data-embed-button']['#value'] == 'paragraphs_inline_entity_form') {
+    return TRUE;
+  }
+}
+
+
+

@@ -1,0 +1,6 @@
+button-bgone:
+  version: 1.0
+  css:
+    state:
+      css/cke-button-paragraphs-disable.css: {}
+

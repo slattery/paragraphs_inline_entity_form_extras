@@ -1,0 +1,24 @@
+{#
+  children: a list of fields and form elements
+
+  The extra markup represents the paragraphs Content/Behavior tabs, which need to be
+  supplied in lieu of a field widget as we are calling the form entity directly.
+
+#}
+
+{%
+  set classes = [
+    has_parent ? 'js-form-wrapper',
+    has_parent ? 'form-wrapper',
+  ]
+%}
+<div{{attributes.addClass(classes)}}>
+  <div class="is-horizontal paragraphs-tabs-wrapper" id="{{attributes['data-form-id']}}-add-more-wrapper">
+    <ul class="paragraphs-tabs tabs primary tabs--secondary paragraphs-tabs-hide clearfix">
+      <li class="tabs__tab paragraphs_content_tab"><a href="#{{attributes['data-form-id']}}-values" class="tabs__link">Content</a></li>
+      <li class="tabs__tab paragraphs_behavior_tab"><a href="#{{attributes['data-form-id']}}-values" class="tabs__link">Behavior</a></li>
+    </ul>
+    <div id="{{attributes['data-form-id']}}-values"><div>&nbsp;</div>
+    {{children}}
+  </div>
+</div>
