@@ -188,7 +188,12 @@ class Collector {
       $text = $entity->get($fieldname)->value;
       $text .= $entity->get($fieldname)->summary ?? '';
       /** @var array $field_uuids */
-      $field_uuids = $this->filter->process($text);
+       $processed = $this->filter->process($text);
+       if ($processed){
+        //process returns FilterProcessResult so we wait and grab
+        //a property from the filter instance that collected the uuids
+        $field_uuids = $this->filter->getParagraphUuids();
+       }
     }
     return $field_uuids;
   }

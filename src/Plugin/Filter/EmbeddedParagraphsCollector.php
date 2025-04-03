@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
+use Drupal\Core\Render\BubbleableMetadata;
 use Drupal\embed\DomHelperTrait;
 use Drupal\entity_embed\Exception\EntityNotFoundException;
 use Drupal\filter\Attribute\Filter;
@@ -25,9 +26,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * @Filter(
  *   id = "embedded_paragraphs_collector",
  *   title = @Translation("Embedded Paragraphs Collector"),
- *   description = @Translation("NOT FOR RENDERING!  This filter harvests embedded paragraphs and populates parent fields to prevent orphaned status"),
+ *   description = @Translation("Not for editing, no need to enable.  Used in node pre-save."),
  *   type = Drupal\filter\Plugin\FilterInterface::TYPE_TRANSFORM_IRREVERSIBLE,
- *   weight = 100,
+ *   weight = 10,
  * )
  */
 class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactoryPluginInterface {
@@ -69,6 +70,8 @@ class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactory
    */
   protected static $recursiveCollectDepth = [];
 
+  protected $paragraphUuids = [];
+
   /**
    * Constructs a EntityEmbedFilter object.
    *
@@ -85,10 +88,11 @@ class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactory
    * @param \Drupal\Core\File\FileUrlGeneratorInterface
    *   The file URL generator.
    */
-  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory) {
+  public function __construct(array $configuration, $plugin_id, $plugin_definition, EntityTypeManagerInterface $entity_type_manager, LoggerChannelFactoryInterface $logger_factory, $paragraphuuids = []) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
     $this->entityTypeManager = $entity_type_manager;
     $this->loggerFactory = $logger_factory;
+    $this->paragraphUuids = $paragraphuuids;
   }
 
   /**
@@ -104,19 +108,23 @@ class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactory
     );
   }
 
+
+  public function getParagraphUuids() {
+    return $this->paragraphUuids;
+  }
+
   /**
    * {@inheritdoc}
    */
   public function process($text, $langcode = 'en') {
     $result = new FilterProcessResult($text);
-    $paragraph_uuids = [];
 
     if (strpos($text, 'data-entity-type') !== FALSE) {
       $dom = Html::load($text);
       $xpath = new \DOMXPath($dom);
-
+      $cache = new BubbleableMetadata();
       foreach ($xpath->query('//drupal-entity[@data-entity-type and @data-entity-uuid]') as $domnode) {
-        /** @var \DOMElement $node */
+        /** @var \DOMElement $domnode */
         $entity_type = $domnode->getAttribute('data-entity-type');
         $entity = NULL;
         $entity_output = '';
@@ -164,14 +172,20 @@ class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactory
               ]);
             }
             else {
-              $paragraph_uuids[] = $entity->uuid();
+              $this->paragraphUuids[] = $entity->uuid();
+              $cache->addCacheableDependency($entity);
+              $result = $result->merge($cache);
             }
           }//if entity
         }//paragraphs_type_check
       }//foreach
+
+      $result->setProcessedText(Html::serialize($dom));
     }//strpos
 
-    return $paragraph_uuids;
+    //This returns FilterProcessResult in case someone turns the toggle on in the text editor config
+    //the uuids for storage are in $this->paragraphUuids array.  Collector grabs that array.
+    return $result;
   }
 
   /**
@@ -180,7 +194,7 @@ class EmbeddedParagraphsCollector extends FilterBase implements ContainerFactory
   public function tips($long = FALSE) {
     if ($long) {
       return $this->t('
-        <p>This filter harvests data-entity-uuid properties when we find data-entity-type="paragraph" in the embed tag:</p>');
+        <p>This filter harvests on node save data-entity-uuid properties when we find data-entity-type="paragraph" in the embed tag:</p>');
     }
     else {
       return $this->t('This machine grabs paragraphs.');

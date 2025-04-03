@@ -6,7 +6,9 @@ This module prevents embedded paragraphs from being orphaned when they are embed
 
 ## Managing embedded paragraphs
 
-This module reclaims embedded paragraphs in text_long and text_w_summary fields in node fields and entity reference revisions fields for a node.   The fields are filtered using entity_embed logic, grabs paragraphs and appends additions to a hidden field on the node.  This prevents embedded paragraphs from being 'orphaned' and exposed to deletion from other processes.
+This module reclaims embedded paragraphs in text_long and text_w_summary fields in node fields and entity reference revisions fields for a node. This prevents embedded paragraphs from being 'orphaned' and exposed to deletion from other processes.
+
+The fields are filtered using entity_embed logic, grabs paragraphs and appends additions to a hidden field on the node. The filtering for this process happens on node-save, if the filter is activated in the ckeditor5 text format config, it will have no impact on the WYSIWYG.  It is possible for a person to instantiate a paragraph and then delete it before saving, and so the filter itself does not alter the node. On node save, the filter is run by a Collector service and any paragraphs not claimed will be adopted.
 
 This depends on a configurable (not base) field being added to each node type that opts-in through a third-party setting, as well as a text profile that includes the button from paragraphs_inline_entity_form.
 
@@ -25,7 +27,7 @@ To account for the desired field widget structure, this module creates a contain
 
 The carrier paragraph comes with twig that acts as a passthrough. it will only render the target paragraph content with no outer elements.
 
-## CKeditor[5]
+## Reflecting Node-type Optin in the CKeditor[5] Toolbar
 
 We have an issue when the module is enabled, and the embed button is configured to a text editor profile, but that text editor profile is used on node types that have not opted in to the embedding feature.  The best we can do right now is to attach css to the form that removes the embed button from the toolbar for that form load, on ckeditor and ckeditor5.
 
